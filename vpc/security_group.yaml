@@ -1,0 +1,180 @@
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  NamePrefix:
+    Type: String
+    Description: "The prefix of resource's Name tag"
+    Default: unicorn
+
+  ApplicationPort:
+    Type: Number
+    Description: "Port number for the application"
+    Default: 8080
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Security group configuration"
+        Parameters:
+          - VpcId
+          - NamePrefix
+          - ApplicationPort
+
+Resources:
+  # ==================================================
+  # ALB security group
+  # ==================================================
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "The security group for ALB"
+      GroupName: !Sub "${NamePrefix}-alb-sg"
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-alb-sg"
+
+  ALBSecurityGroupIngress1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      Description: "from internet"
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+
+  ALBSecurityGroupEgress1:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: "to application"
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ApplicationPort
+      ToPort: !Ref ApplicationPort
+      DestinationSecurityGroupId: !Ref AppSecurityGroup
+
+  # ==================================================
+  # Application security group
+  # ==================================================
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "The security group for application"
+      GroupName: !Sub "${NamePrefix}-app-sg"
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-app-sg"
+
+  AppSecurityGroupIngressALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AppSecurityGroup
+      Description: "from ALB"
+      IpProtocol: tcp
+      FromPort: !Ref ApplicationPort
+      ToPort: !Ref ApplicationPort
+      SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+  AppSecurityGroupEgressHTTPS:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AppSecurityGroup
+      Description: "to internet"
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+
+  AppSecurityGroupEgressHTTP:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AppSecurityGroup
+      Description: "to internet"
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+
+  # AppSecurityGroupEgressRDS:
+  #   Type: AWS::EC2::SecurityGroupEgress
+  #   Properties:
+  #     GroupId: !Ref AppSecurityGroup
+  #     Description: "to RDS"
+  #     IpProtocol: tcp
+  #     FromPort: 3306
+  #     ToPort: 3306
+  #     CidrIp: !Ref RDSSecurityGroup
+
+  # # ==================================================
+  # # RDS security group
+  # # ==================================================
+
+  # RDSSecurityGroup:
+  #   Type: AWS::EC2::SecurityGroup
+  #   Properties:
+  #     VpcId: !Ref VpcId
+  #     GroupName: !Sub "${NamePrefix}-rds-sg"
+  #     GroupDescription: "The security group for RDS"
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Sub "${NamePrefix}-rds-sg"
+  #       - Key: Project
+  #         Value: !Ref Project
+  #       - Key: Owner
+  #         Value: !Ref Owner
+
+  # RDSSecurityGroupIngress1:
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties:
+  #     GroupId: !Ref RDSSecurityGroup
+  #     Description: "from application"
+  #     IpProtocol: tcp
+  #     FromPort: 3306
+  #     ToPort: 3306
+  #     SourceSecurityGroupId: !Ref AppSecurityGroup
+
+  # RDSSecurityGroupEgress1:
+  #   Type: AWS::EC2::SecurityGroupEgress
+  #   Properties:
+  #     GroupId: !Ref RDSSecurityGroup
+  #     Description: "DELETE_ME"
+  #     IpProtocol: -1
+  #     CidrIp: 0.0.0.0/0
+
+  # # ==================================================
+  # # Bastion security group
+  # # ==================================================
+
+  # BastionSecurityGroup:
+  #   Type: AWS::EC2::SecurityGroup
+  #   Properties:
+  #     VpcId: !Ref VpcId
+  #     GroupName: !Sub "${NamePrefix}-bastion-sg"
+  #     GroupDescription: "The security group for Bastion"
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Sub "${NamePrefix}-bastion-sg"
+
+  # BastionSecurityGroupIngress1:
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties:
+  #     GroupId: !Ref BastionSecurityGroup
+  #     Description: "from local machine"
+  #     IpProtocol: tcp
+  #     FromPort: 22
+  #     ToPort: 22
+  #     CidrIp: 1.2.3.4/32
+
+  # BastionSecurityGroupEgress1:
+  #   Type: AWS::EC2::SecurityGroupEgress
+  #   Properties:
+  #     GroupId: !Ref BastionSecurityGroup
+  #     Description: "to internet"
+  #     IpProtocol: -1
+  #     CidrIp: 0.0.0.0/0

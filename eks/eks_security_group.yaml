@@ -1,0 +1,395 @@
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: "The VPC id associated security group"
+
+  Project:
+    Type: String
+    Description: "The project name for provisioned this resources"
+    Default: wsi
+
+  Owner:
+    Type: String
+    Description: "The team name for owned this resources"
+    Default: hmoon
+
+  NamePrefix:
+    Type: String
+    Description: "The prefix of resource's Name tag"
+
+  ApplicationPort:
+    Type: Number
+    Description: "Port number for the application"
+    Default: 80
+
+  # BastionSSHPort:
+  #   Type: Number
+  #   Description: "Port number for the bastion"
+  #   Default: 22
+
+  # BastionSSHCidr:
+  #   Type: String
+  #   Description: "Allowed Cidr IP range. https://checkip.amazonaws.com"
+  #   Default: 0.0.0.0/0
+
+Resources:
+  #
+  # ALB security group
+  #
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupName: !Sub "${NamePrefix}-alb-sg"
+      GroupDescription: "The security group for ALB"
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-alb-sg"
+        - Key: Project
+          Value: !Ref Project
+        - Key: Owner
+          Value: !Ref Owner
+
+  ALBSecurityGroupIngressInternet:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      Description: "from internet"
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+
+  ALBSecurityGroupEgressApp:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      Description: "to application"
+      IpProtocol: tcp
+      FromPort: !Ref ApplicationPort
+      ToPort: !Ref ApplicationPort
+      DestinationSecurityGroupId: !Ref AppNodegroupSecurityGroup
+
+  #
+  # Application security group
+  #
+  NodegroupSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupName: !Sub "${NamePrefix}-nodegroup-sg"
+      GroupDescription: "The security group for EKS nodegroup"
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-nodegroup-sg"
+        - Key: Project
+          Value: !Ref Project
+        - Key: Owner
+          Value: !Ref Owner
+
+  NodegroupSecurityGroupIngressSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NodegroupSecurityGroup
+      Description: "from nodegroup"
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref NodegroupSecurityGroup
+
+  NodegroupSecurityGroupIngressClusterHTTPS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NodegroupSecurityGroup
+      Description: "from cluster"
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref ClusterSecurityGroup
+
+  NodegroupSecurityGroupIngressClusterEphemeral:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NodegroupSecurityGroup
+      Description: "from cluster"
+      IpProtocol: tcp
+      FromPort: 1024
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref ClusterSecurityGroup
+
+  NodegroupSecurityGroupEgressSelf:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref NodegroupSecurityGroup
+      Description: "to nodegroup"
+      IpProtocol: -1
+      DestinationSecurityGroupId: !Ref NodegroupSecurityGroup
+
+  NodegroupSecurityGroupEgressCluster:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref NodegroupSecurityGroup
+      Description: "to cluster"
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !Ref ClusterSecurityGroup
+
+  NodegroupSecurityGroupEgressHTTPS:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref NodegroupSecurityGroup
+      Description: "to internet"
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+
+  NodegroupSecurityGroupEgressHTTP:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref NodegroupSecurityGroup
+      Description: "to internet"
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+
+  #
+  # Application security group
+  #
+  AppNodegroupSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupName: !Sub "${NamePrefix}-app-nodegroup-sg"
+      GroupDescription: "The security group for application"
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-app-nodegroup-sg"
+        - Key: Project
+          Value: !Ref Project
+        - Key: Owner
+          Value: !Ref Owner
+
+  AppNodegroupSecurityGroupIngressALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AppNodegroupSecurityGroup
+      Description: "from ALB"
+      IpProtocol: tcp
+      FromPort: !Ref ApplicationPort
+      ToPort: !Ref ApplicationPort
+      SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+  AppNodegroupSecurityGroupEgressRDS:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AppNodegroupSecurityGroup
+      Description: "to RDS"
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      DestinationSecurityGroupId: !Ref RDSSecurityGroup
+
+  # AppNodegroupSecurityGroupEgressRDSOther:
+  #   Type: AWS::EC2::SecurityGroupEgress
+  #   Properties:
+  #     GroupId: !Ref AppNodegroupSecurityGroup
+  #     Description: "to RDS"
+  #     IpProtocol: tcp
+  #     FromPort: 3306
+  #     ToPort: 3306
+  #     CidrIp: 10.20.0.0/16
+
+  # AppNodegroupSecurityGroupEgressCache:
+  #   Type: AWS::EC2::SecurityGroupEgress
+  #   Properties:
+  #     GroupId: !Ref AppNodegroupSecurityGroup
+  #     Description: "to cache"
+  #     IpProtocol: tcp
+  #     FromPort: 6379
+  #     ToPort: 6379
+  #     DestinationSecurityGroupId: !Ref CacheSecurityGroup
+
+  # AppNodegroupSecurityGroupEgressCacheOther:
+  #   Type: AWS::EC2::SecurityGroupEgress
+  #   Properties:
+  #     GroupId: !Ref AppNodegroupSecurityGroup
+  #     Description: "to cache"
+  #     IpProtocol: tcp
+  #     FromPort: 6379
+  #     ToPort: 6379
+  #     CidrIp: 10.20.0.0/16
+
+  #
+  # Addon security group
+  #
+  AddonSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupName: !Sub "${NamePrefix}-addon-nodegroup-sg"
+      GroupDescription: "The security group for addon"
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-addon-nodegroup-sg"
+        - Key: Project
+          Value: !Ref Project
+        - Key: Owner
+          Value: !Ref Owner
+
+  AddonSecurityGroupEgressSSH:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AddonSecurityGroup
+      Description: "to git repository"
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: 0.0.0.0/0
+
+  #
+  # RDS security group
+  #
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupName: !Sub "${NamePrefix}-rds-sg"
+      GroupDescription: "The security group for RDS"
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-rds-sg"
+        - Key: Project
+          Value: !Ref Project
+        - Key: Owner
+          Value: !Ref Owner
+
+  RDSSecurityGroupIngressApp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      Description: "from app"
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref AppNodegroupSecurityGroup
+
+  # RDSSecurityGroupIngressAppOther:
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties:
+  #     GroupId: !Ref RDSSecurityGroup
+  #     Description: "from app"
+  #     IpProtocol: tcp
+  #     FromPort: 3306
+  #     ToPort: 3306
+  #     CidrIp: 10.20.0.0/16
+
+  RDSSecurityGroupEgressDefault:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      Description: "DELETE_ME"
+      IpProtocol: -1
+      CidrIp: 0.0.0.0/0
+
+  #
+  # Cluster security group
+  #
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupName: !Sub "${NamePrefix}-cluster-sg"
+      GroupDescription: "The security group for Cluster"
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-cluster-sg"
+        - Key: Project
+          Value: !Ref Project
+        - Key: Owner
+          Value: !Ref Owner
+
+  ClusterSecurityGroupIngressNodegroup:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      Description: "from nodegroup"
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref NodegroupSecurityGroup
+
+  # ClusterSecurityGroupIngressInternet:
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties:
+  #     GroupId: !Ref ClusterSecurityGroup
+  #     Description: "from local machine"
+  #     IpProtocol: tcp
+  #     FromPort: 443
+  #     ToPort: 443
+  #     CidrIp: 175.195.57.176/32
+
+  ClusterSecurityGroupEgressNodegroupHTTPS:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      Description: "to nodegroup"
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !Ref AppNodegroupSecurityGroup
+
+  ClusterSecurityGroupEgressNodegroupEphemeral:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      Description: "to nodegroup"
+      IpProtocol: tcp
+      FromPort: 1024
+      ToPort: 65535
+      DestinationSecurityGroupId: !Ref AppNodegroupSecurityGroup
+
+  # #
+  # # Cache security group
+  # #
+  # CacheSecurityGroup:
+  #   Type: AWS::EC2::SecurityGroup
+  #   Properties:
+  #     VpcId: !Ref VpcId
+  #     GroupName: !Sub "${NamePrefix}-cache-sg"
+  #     GroupDescription: "The security group for cache"
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Sub "${NamePrefix}-cache-sg"
+  #       - Key: Project
+  #         Value: !Ref Project
+  #       - Key: Owner
+  #         Value: !Ref Owner
+
+  # CacheSecurityGroupIngressApp:
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties:
+  #     GroupId: !Ref CacheSecurityGroup
+  #     Description: "from app"
+  #     IpProtocol: tcp
+  #     FromPort: 6379
+  #     ToPort: 6379
+  #     SourceSecurityGroupId: !Ref AppNodegroupSecurityGroup
+
+  # CacheSecurityGroupIngressAppOther:
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties:
+  #     GroupId: !Ref CacheSecurityGroup
+  #     Description: "from app"
+  #     IpProtocol: tcp
+  #     FromPort: 6379
+  #     ToPort: 6379
+  #     CidrIp: 10.20.0.0/16
+
+  # CacheSecurityGroupEgressDefault:
+  #   Type: AWS::EC2::SecurityGroupEgress
+  #   Properties:
+  #     GroupId: !Ref CacheSecurityGroup
+  #     Description: "DELETE_ME"
+  #     IpProtocol: -1
+  #     CidrIp: 0.0.0.0/0

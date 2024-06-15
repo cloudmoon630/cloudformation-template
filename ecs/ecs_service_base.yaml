@@ -1,0 +1,162 @@
+Parameters:
+  ClusterName:
+    Type: String
+    Description: "ECS cluster name"
+
+  ServiceName:
+    Type: String
+    Description: "ECS service Name"
+
+  CapacityProvider:
+    Type: String
+    Description: "Capacity provider name. FARGATE, EC2 or your custom name"
+
+  CloudMapServiceArn:
+    Type: String
+    Description: "(Optional) Service Arn of CloudMap"
+
+  EnableECSExec:
+    Type: String
+    Description: "Enable Execute command into task"
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+
+  TaskDefinitionName:
+    Type: String
+    Description: "Task definition name"
+
+  ContainerName:
+    Type: String
+    Description: "Container name to be attached to load balancer"
+
+  ContainerPort:
+    Type: Number
+    Description: "Container port which allows traffic"
+    Default: 8080
+
+  TargetGroupArn:
+    Type: String
+    Description: "Target group ARN for tasks to be attached"
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "The subnet ids for locate your task"
+
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: "The security group ids for attached your task"
+
+  DeploymentController:
+    Type: String
+    Description: "!!! Changing controller will cause service recreation. Be aware of duplicated service name"
+    AllowedValues:
+      - "ECS"
+      - "CODE_DEPLOY"
+    Default: ECS
+
+Conditions:
+  RegistryExists: !Not [!Equals [!Ref CloudMapServiceArn, ""]]
+  UsingCodeDeploy: !Equals [!Ref DeploymentController, "CODE_DEPLOY"]
+  IsFargate: !Equals [!Ref CapacityProvider, "FARGATE"]
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Service Configuration"
+        Parameters:
+          - ClusterName
+          - ServiceName
+          - CapacityProvider
+          - CloudMapServiceArn
+          - EnableECSExec
+      - Label:
+          default: "Task Configuration"
+        Parameters:
+          - TaskDefinitionName
+          - ContainerName
+          - ContainerPort
+          - TargetGroupArn
+          - SubnetIds
+          - SecurityGroupIds
+          - DeploymentController
+
+Resources:
+  #
+  # ECS -Service
+  #
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      ServiceName: !Ref ServiceName
+      TaskDefinition: !Ref TaskDefinitionName
+
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: !Ref SecurityGroupIds
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: !Ref ContainerName
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroupArn
+
+      CapacityProviderStrategy:
+        - Base: 0
+          CapacityProvider: !Ref CapacityProvider
+          Weight: 100
+      PlacementStrategies: !If
+        - IsFargate
+        - !Ref AWS::NoValue
+        - - Field: "attribute:ecs.availability-zone"
+            Type: "spread"
+          - Field: "instanceId"
+            Type: "spread"
+
+      DeploymentController:
+        Type: !Ref DeploymentController
+      DeploymentConfiguration: !If
+        - UsingCodeDeploy
+        - !Ref AWS::NoValue
+        - DeploymentCircuitBreaker:
+            Enable: true
+            Rollback: true
+          MaximumPercent: 150
+          MinimumHealthyPercent: 100
+
+      ServiceRegistries:
+        !If [RegistryExists, [RegistryArn: !Ref CloudMapServiceArn], []]
+      EnableExecuteCommand: !Ref EnableECSExec
+
+  #
+  # Application Auto Scaling - Scalable Target
+  #
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ResourceId:
+        !Join ["/", ["service", !Ref ClusterName, !GetAtt Service.Name]]
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      MinCapacity: 2
+      MaxCapacity: 60
+      RoleARN: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService"
+
+  #
+  # Application Auto Scaling - ScalingPolicy
+  #
+  ScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      ScalingTargetId: !Ref ScalableTarget
+      PolicyType: TargetTrackingScaling
+      PolicyName: !Sub "${ClusterName}-{ServiceName}-scaling-policy"
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleOutCooldown: 120
+        ScaleInCooldown: 120
+        TargetValue: 60.0

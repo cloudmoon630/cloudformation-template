@@ -1,0 +1,206 @@
+Parameters:
+  ECSCluster:
+    Type: String
+    Description: "The name of ecs cluster, created not yet"
+
+  InstanceName:
+    Type: String
+    Description: "The name of instance created by auto scaling group"
+
+  InstanceType:
+    Type: String
+    Description: "Instance type. Be aware of cpu architecture type"
+    Default: t3.small
+
+  AMI:
+    Type: String
+    Description: "The AMI for launched instances"
+    AllowedValues:
+      - /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+      - /aws/service/ecs/optimized-ami/amazon-linux-2/arm64/recommended/image_id
+      - /aws/service/bottlerocket/aws-ecs-1/x86_64/latest/image_id
+      - /aws/service/bottlerocket/aws-ecs-1/arm64/latest/image_id
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "The Keypair for launched instances"
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "The Subnet Ids for launched instances"
+
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: "The Security Group Ids for launched instances"
+
+  Project:
+    Type: String
+    Description: "The project name for provisioned this resources"
+    Default: wsi
+
+  Owner:
+    Type: String
+    Description: "The team name for owned this resources"
+    Default: hmoon
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "ASG Configuration"
+        Parameters:
+          - ECSCluster
+          - InstanceName
+          - InstanceType
+          - AMI
+          - KeyPair
+          - SubnetIds
+          - SecurityGroupIds
+      - Label:
+          default: "Tag Configuration"
+        Parameters:
+          - Project
+          - Owner
+
+Conditions:
+  IsBottlerocket:
+    Fn::Or:
+      - !Equals [
+          !Ref AMI,
+          "/aws/service/bottlerocket/aws-ecs-1/x86_64/latest/image_id",
+        ]
+      - !Equals [
+          !Ref AMI,
+          "/aws/service/bottlerocket/aws-ecs-1/arm64/latest/image_id",
+        ]
+
+Resources:
+  #
+  # IAM Role
+  #
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${InstanceName}-role"
+      Description: !Sub "The role for ${InstanceName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Project
+          Value: !Ref Project
+        - Key: Owner
+          Value: !Ref Owner
+
+  #
+  # IAM Instance Profile
+  #
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "${InstanceName}-role"
+      Path: /
+      Roles:
+        - !Ref Role
+
+  #
+  # LaunchTemplate
+  #
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Ref InstanceName
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              DeleteOnTermination: true
+              VolumeType: gp3
+              VolumeSize: 30
+              Iops: 3000
+              Throughput: 125
+              Encrypted: true
+        IamInstanceProfile:
+          Name: !Ref InstanceProfile
+        ImageId: !Sub "{{resolve:ssm:${AMI}}}"
+        InstanceInitiatedShutdownBehavior: terminate
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPair
+        Monitoring:
+          Enabled: true
+        SecurityGroupIds: !Ref SecurityGroupIds
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Ref InstanceName
+              - Key: Project
+                Value: !Ref Project
+              - Key: Owner
+                Value: !Ref Owner
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Ref InstanceName
+              - Key: Project
+                Value: !Ref Project
+              - Key: Owner
+                Value: !Ref Owner
+        UserData:
+          Fn::Base64: !If
+            - IsBottlerocket
+            - !Sub |
+              [settings.ecs]
+              cluster = "${ECSCluster}"
+            - !Sub |
+              #!/bin/bash
+              cat <<'EOF' >> /etc/ecs/ecs.config
+              ECS_CLUSTER=${ECSCluster}
+              ECS_LOGLEVEL=info
+              EOF
+
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: !Ref InstanceName
+            - Key: Project
+              Value: !Ref Project
+            - Key: Owner
+              Value: !Ref Owner
+
+  #
+  # Auto Scaling Group
+  #
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: !Ref SubnetIds
+      AutoScalingGroupName: !Ref InstanceName
+      MinSize: "2"
+      MaxSize: "20"
+      Cooldown: "120"
+      DesiredCapacityType: units
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 60
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Ref InstanceName
+          PropagateAtLaunch: true
+
+Outputs:
+  ResolvedAMI:
+    Value: !Sub "{{resolve:ssm:${AMI}}}"

@@ -1,0 +1,486 @@
+Parameters:
+  NamePrefix:
+    Type: String
+    Description: The prefix of resource's Name tag
+    Default: unicorn
+
+  EnableFlowLog:
+    Type: String
+    Description: Enable VPC flow log. Logs will be delivered to cloudwatch log group, /aws/flow-log/<VPC_NAME>
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+
+  AZCount:
+    Type: Number
+    Description: How many AZs to deploy subnets
+    AllowedValues:
+      - 2
+      - 3
+    Default: 2
+
+  DataSubnetCreation:
+    Type: String
+    Description: Create data subnets with no internet access
+    AllowedValues:
+      - "Yes"
+      - "No"
+    Default: "No"
+
+  VPCCidr:
+    Description: Cidr block of VPC
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicSubnetACidr:
+    Description: Cidr block of public subnet A
+    Type: String
+    Default: 10.0.0.0/24
+
+  PublicSubnetBCidr:
+    Description: Cidr block of public subnet B
+    Type: String
+    Default: 10.0.1.0/24
+
+  PublicSubnetCCidr:
+    Description: Cidr block of public subnet C
+    Type: String
+    Default: 10.0.2.0/24
+
+  PrivateSubnetACidr:
+    Description: Cidr block of private subnet A
+    Type: String
+    Default: 10.0.10.0/24
+
+  PrivateSubnetBCidr:
+    Description: Cidr block of private subnet B
+    Type: String
+    Default: 10.0.11.0/24
+
+  PrivateSubnetCCidr:
+    Description: Cidr block of private subnet C
+    Type: String
+    Default: 10.0.12.0/24
+
+  DataSubnetACidr:
+    Description: Cidr block of data subnet A
+    Type: String
+    Default: 10.0.20.0/24
+
+  DataSubnetBCidr:
+    Description: Cidr block of data subnet B
+    Type: String
+    Default: 10.0.21.0/24
+
+  DataSubnetCCidr:
+    Description: Cidr block of data subnet C
+    Type: String
+    Default: 10.0.22.0/24
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "VPC Configuration"
+        Parameters:
+          - NamePrefix
+          - EnableFlowLog
+      - Label:
+          default: "Subnet creation"
+        Parameters:
+          - AZCount
+          - DataSubnetCreation
+      - Label:
+          default: "Network CIDR Configuration"
+        Parameters:
+          - VPCCidr
+          - PublicSubnetACidr
+          - PublicSubnetBCidr
+          - PublicSubnetCCidr
+          - PrivateSubnetACidr
+          - PrivateSubnetBCidr
+          - PrivateSubnetCCidr
+          - DataSubnetACidr
+          - DataSubnetBCidr
+          - DataSubnetCCidr
+
+Conditions:
+  CreateFlowLog: !Equals [!Ref EnableFlowLog, "true"]
+  CreateThirdSubnet: !Equals [!Ref AZCount, 3]
+  CreateDataSubnet: !Equals [!Ref DataSubnetCreation, "Yes"]
+  CreateThirdDataSubnet: !And
+    - !Condition CreateDataSubnet
+    - !Condition CreateThirdSubnet
+
+Resources:
+  # ==================================================
+  # VPC
+  # ==================================================
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-vpc"
+
+  # ==================================================
+  # Subnets
+  # ==================================================
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetACidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-public-subnet-a"
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetBCidr
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-public-subnet-b"
+
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Condition: CreateThirdSubnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCCidr
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-public-subnet-c"
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetACidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-private-subnet-a"
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetBCidr
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-private-subnet-b"
+
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    Condition: CreateThirdSubnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCCidr
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-private-subnet-c"
+
+  DataSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: CreateDataSubnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref DataSubnetACidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-data-subnet-a"
+
+  DataSubnetB:
+    Type: AWS::EC2::Subnet
+    Condition: CreateDataSubnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref DataSubnetBCidr
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-data-subnet-b"
+
+  DataSubnetC:
+    Type: AWS::EC2::Subnet
+    Condition: CreateThirdDataSubnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref DataSubnetCCidr
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-data-subnet-c"
+
+  # ==================================================
+  # Gateways
+  # ==================================================
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-igw"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayAEIP.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-nat-a"
+
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayBEIP.AllocationId
+      SubnetId: !Ref PublicSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-nat-b"
+
+  NatGatewayC:
+    Type: AWS::EC2::NatGateway
+    Condition: CreateThirdSubnet
+    Properties:
+      AllocationId: !GetAtt NatGatewayCEIP.AllocationId
+      SubnetId: !Ref PublicSubnetC
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-nat-c"
+
+  NatGatewayAEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-nat-a-eip"
+
+  NatGatewayBEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-nat-b-eip"
+
+  NatGatewayCEIP:
+    Type: AWS::EC2::EIP
+    Condition: CreateThirdSubnet
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-nat-c-eip"
+
+  # ==================================================
+  # Route tables
+  # ==================================================
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-public-rt"
+
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-private-rt-a"
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-private-rt-b"
+
+  PrivateRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Condition: CreateThirdSubnet
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-private-rt-c"
+
+  DataRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: CreateDataSubnet
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${NamePrefix}-data-rt"
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref PublicRouteTable
+      GatewayId: !Ref InternetGateway
+
+  DefaultPrivateRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref PrivateRouteTableA
+      NatGatewayId: !Ref NatGatewayA
+
+  DefaultPrivateRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref PrivateRouteTableB
+      NatGatewayId: !Ref NatGatewayB
+
+  DefaultPrivateRouteC:
+    Type: AWS::EC2::Route
+    Condition: CreateThirdSubnet
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref PrivateRouteTableC
+      NatGatewayId: !Ref NatGatewayC
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetA
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetB
+
+  PublicSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateThirdSubnet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetC
+
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      SubnetId: !Ref PrivateSubnetA
+
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      SubnetId: !Ref PrivateSubnetB
+
+  PrivateSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateThirdSubnet
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableC
+      SubnetId: !Ref PrivateSubnetC
+
+  DataSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateDataSubnet
+    Properties:
+      RouteTableId: !Ref DataRouteTable
+      SubnetId: !Ref DataSubnetA
+
+  DataSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateDataSubnet
+    Properties:
+      RouteTableId: !Ref DataRouteTable
+      SubnetId: !Ref DataSubnetB
+
+  DataSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateThirdDataSubnet
+    Properties:
+      RouteTableId: !Ref DataRouteTable
+      SubnetId: !Ref DataSubnetC
+
+  # ==================================================
+  # VPC Flow Logs
+  # ==================================================
+
+  FlowLog:
+    Type: AWS::EC2::FlowLog
+    Condition: CreateFlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt FlowLogRole.Arn
+      LogGroupName: !Sub "/aws/flow-log/${VPC}"
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+
+  FlowLogRole:
+    Type: AWS::IAM::Role
+    Condition: CreateFlowLog
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - vpc-flow-logs.amazonaws.com
+      Policies:
+        - PolicyName: cloudwatch-logs-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                  - "logs:DescribeLogGroups"
+                  - "logs:DescribeLogStreams"
+                Resource: "*"
